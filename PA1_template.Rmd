@@ -5,21 +5,128 @@ output:
     keep_md: true
 ---
 
+# Personal activity monitoring data analysis
+
+It is now possible to collect a large amount of data about personal movement using activity monitoring devices. Assignment makes use of these data, which consists of values at 5 minute intervals throughout the day.
+
+```{r, echo=FALSE, message=FALSE, warnings=FALSE}
+# importing libraries
+library(dplyr)
+library(xtable)
+library(ggplot2)
+```
+
 
 ## Loading and preprocessing the data
 
-
+```{r}
+activity <- read.csv("activity.csv", na.strings = "NA")
+activity <- tbl_df(activity)
+```
 
 ## What is mean total number of steps taken per day?
 
+```{r, results='asis'}
+calculate_mean_median <- function(data) {
+  # select only rows with not-NA number of steps
+  steps_by_date <- tapply(data$steps, data$date, sum, na.rm=TRUE)
+  hist(steps_by_date, main="Distribution of steps per day", col="wheat", breaks=15)
+  rug(steps_by_date)
 
+  mean_steps_df <- aggregate(data$steps, list(data$date), mean, na.rm=TRUE)
+  colnames(mean_steps_df) <- c("date", "mean value")
+
+  median_steps_df <- aggregate(data$steps, list(data$date), median, na.rm=TRUE)
+  colnames(median_steps_df) <- c("date", "median value")
+
+  result <- merge(mean_steps_df, median_steps_df)
+  result
+}
+original_stat_results <- calculate_mean_median(activity)
+```
+
+#### Table of mean/median steps taken in each day
+```{r, results='asis'}
+print(xtable(original_stat_results), type="html", include.rownames=FALSE)
+```
 
 ## What is the average daily activity pattern?
+```{r, results="asis"}
+by_time_interval <- aggregate(activity$steps, list(activity$interval), mean, na.rm=TRUE)
+colnames(by_time_interval) <- c("interval", "steps")
+plot(by_time_interval, type="l")
+```
 
+#### Interval that contains maximum number of steps on average
+```{r}
+interval_of_max <- by_time_interval[which.max(by_time_interval$steps),]$interval
+```
+Interval that contains maximum number of steps (on average) is `r interval_of_max`
 
 
 ## Imputing missing values
 
+#### Number of rows with missing values
+```{r}
+sum(is.na(activity$steps))
+```
 
+#### Imputing average for given interval instead of missing value
+Every interval with missing (NA) value is populated with mean value for this interval 
+```{r, results="asis"}
+
+# create column of the same length as row number in table 
+# but containing replicated mean values
+one_day <- 60 * 24 / 5
+number_of_days <- dim(activity)[1]/one_day
+imputed_values <- rep(by_time_interval[, c("steps")], times=number_of_days)
+
+# append column to table
+data <- cbind(activity, imputed_values)
+
+conditional_update <- function(steps, imputed_values) {
+  ifelse(is.na(steps), imputed_values, steps)
+}
+ 
+with_imputed <- mutate(data, steps = conditional_update(steps, imputed_values))
+with_imputed <- select(with_imputed, -imputed_values)
+```
+
+#### Comparing to estimates from first part (before imputing data)
+Comparison table of mean/median for original data and data with imputed values is displayed
+```{r, results='asis'}
+updated_stat_results <- calculate_mean_median(with_imputed)
+colnames(updated_stat_results) <- c("date", "updated mean", "updated median") 
+
+all_stat_results <- merge(original_stat_results, updated_stat_results)
+print(xtable(all_stat_results), type="html", include.rownames=FALSE)
+```
 
 ## Are there differences in activity patterns between weekdays and weekends?
+```{r, results="asis"}
+with_imputed <-
+  with_imputed %>%
+  mutate(date=as.Date(date)) %>%
+  mutate(daytype=ifelse(weekdays(date, abbreviate(TRUE)) %in% c("Sat","Sun"),
+                        "weekend", "weekday"))
+
+weekend_data <- with_imputed[with_imputed$daytype == 'weekend', ]
+weekend_averages <- aggregate(weekend_data$steps, list(weekend_data$interval), mean)
+weekend_averages$daytype <- "weekend"
+                          
+weekday_data <- with_imputed[with_imputed$daytype == 'weekday', ]
+weekday_averages <- aggregate(weekday_data$steps, list(weekday_data$interval), mean)
+weekday_averages$daytype <- "weekday"
+
+combined_averages <- rbind(weekday_averages, weekend_averages)
+colnames(combined_averages) <- c("interval", "steps", "daytype")
+```
+
+#### Creating plots
+```{r}
+g = ggplot(combined_averages, aes(interval, steps, color=factor(daytype)))
+g + geom_line() + 
+    facet_grid(daytype~.) +
+    ggtitle("Comparing activity for weekday/weekend") + 
+    theme_bw()
+```
